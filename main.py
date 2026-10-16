@@ -62,12 +62,11 @@ def webhook(body: dict):
     elif text.startswith("/"):
         output = "모르는 명령이에요. /help 를 보내 보세요."
     else:
-        weather = get_weather()
-        weather_line = describe(weather) if weather else "알 수 없음"
+        weather_line = weather_text()
         found = places.search(text, PLACES)
         print("[찾은 식당]", [p["이름"] for p in found])
-        system = build_prompt_v3(weather_line, db.recent_meals(conn), found)
-        output = ask_ai(system, text) 
+        system = SYSTEM_PROMPT_V1
+        output = ask_ai(system, text)
 
     requests.get(f"{URL}/sendMessage", params={"chat_id": chat_id, "text": output})  # 답장 보내기
     print("[보냄]", output)
