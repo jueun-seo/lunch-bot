@@ -9,7 +9,9 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 
 from weather import weather_text
-import db
+from ai import ask_ai
+import places
+from prompts import SYSTEM_PROMPT_V1
 
 load_dotenv()
 URL = f"https://api.telegram.org/bot{os.getenv('TELEGRAM_TOKEN')}"
@@ -18,7 +20,7 @@ MENUS = ["라면", "햄버거", "마라탕", "샐러드"]
 
 app = FastAPI()  # 웹 서버 앱
 conn = db.connect() # lunch.db 파일을 열고 표가 없으면 만든다 (서버가 켜질 때 한번만)
- 
+PLACES = places.load_places("places_sample.csv")
 
 @app.post("/")  # 텔레그램이 메시지(JSON)를 이 주소로 POST 해 준다 (webhook)
 def webhook(body: dict):
@@ -45,7 +47,7 @@ def webhook(body: dict):
     elif text == "/weather":
         output = weather_text()
     elif text == "/ate" or text.startswith("/ate"):
-        menu = text[4:].strip() # /ate 김치찌개" -> 앞 4글자("/ate")를 잘라내고 남은 "김치찌개"의 공백 제거
+        menu = text[4:].strip()  # /ate 김치찌개 → 앞 4글자("/ate")를 잘라내고 남은 "김치찌개"의 공백 제거
         if menu:
             db.save_meal(conn, menu, db.now())
             output = f"기록했어요: {menu}"
@@ -55,14 +57,17 @@ def webhook(body: dict):
         meals = db.recent_meals(conn)
         if meals:
             output = "\n".join(f"{eaten_at} {menu}" for eaten_at, menu in meals)
-    else:
-            output = "아직 기록이 없어요"
         else:
-            output = "오늘 먹은 메뉴를 기록하려면 /ate 메뉴명 처럼 보내 주세요."
+            output = "아직 기록이 없어요"
     elif text.startswith("/"):
         output = "모르는 명령이에요. /help 를 보내 보세요."
     else:
-        output = text  # 메아리
+        weather = get_weather()
+        weather_line = describe(weather) if weather else "알 수 없음"
+        found = places.search(text, PLACES)
+        print("[찾은 식당]", [p["이름"] for p in found])
+        system = build_prompt_v3(weather_line, db.recent_meals(conn), found)
+        output = ask_ai(system, text) 
 
     requests.get(f"{URL}/sendMessage", params={"chat_id": chat_id, "text": output})  # 답장 보내기
     print("[보냄]", output)
