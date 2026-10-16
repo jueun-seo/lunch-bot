@@ -6,12 +6,13 @@ import db
 
 import requests
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import BackgroundTasks, FastAPI
+import news
 
-from weather import weather_text
+from weather import describe, get_weather, weather_text
 from ai import ask_ai
 import places
-from prompts import SYSTEM_PROMPT_V1
+from prompts import build_prompt_v3
 
 load_dotenv()
 URL = f"https://api.telegram.org/bot{os.getenv('TELEGRAM_TOKEN')}"
@@ -23,7 +24,7 @@ conn = db.connect() # lunch.db 파일을 열고 표가 없으면 만든다 (서�
 PLACES = places.load_places("places_sample.csv")
 
 @app.post("/")  # 텔레그램이 메시지(JSON)를 이 주소로 POST 해 준다 (webhook)
-def webhook(body: dict):
+def webhook(body: dict, background_tasks: BackgroundTasks):
     # print(json.dumps(body, indent=2, ensure_ascii=False))  # 받은 JSON 전체를 보고 싶으면 앞의 #을 지운다
     message = body.get("message", {})
     if "text" not in message:  # 사진·스티커처럼 글자가 아닌 메시지는 받기만 한다
@@ -44,9 +45,12 @@ def webhook(body: dict):
         numbers = random.sample(range(1, 46), 6)  # 1~45 중 겹치지 않게 6개 뽑기
         numbers.sort()                            # 작은 숫자부터 정렬
         output = "이번 주 행운의 번호: " + ", ".join(str(n) for n in numbers)
+    elif text.strip() in ("의학뉴스", "/news"):
+        background_tasks.add_task(news.send_news_to, chat_id, URL)  # 뉴스는 뒤에서 보낸다
+        output = "메디칼타임즈 최신 뉴스를 가져오는 중이에요. 30초쯤 걸려요…"
     elif text == "/weather":
         output = weather_text()
-    elif text == "/ate" or text.startswith("/ate"):
+    elif text == "/ate" or text.startswith("/ate "):
         menu = text[4:].strip()  # /ate 김치찌개 → 앞 4글자("/ate")를 잘라내고 남은 "김치찌개"의 공백 제거
         if menu:
             db.save_meal(conn, menu, db.now())
@@ -62,12 +66,12 @@ def webhook(body: dict):
     elif text.startswith("/"):
         output = "모르는 명령이에요. /help 를 보내 보세요."
     else:
-        weather_line = weather_text()
+        weather = get_weather()
+        weather_line = describe(weather) if weather else "알 수 없음"
         found = places.search(text, PLACES)
         print("[찾은 식당]", [p["이름"] for p in found])
-        system = SYSTEM_PROMPT_V1
+        system = build_prompt_v3(weather_line, db.recent_meals(conn), found)
         output = ask_ai(system, text)
-
     requests.get(f"{URL}/sendMessage", params={"chat_id": chat_id, "text": output})  # 답장 보내기
     print("[보냄]", output)
     return {"ok": True}  # 200 OK = 잘 받았다. 중간에 에러로 멈추면(500) 텔레그램이 같은 메시지를 다시 보낸다
