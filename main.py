@@ -2,12 +2,14 @@
 import json
 import os
 import random
+import db
 
 import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI
 
 from weather import weather_text
+import db
 
 load_dotenv()
 URL = f"https://api.telegram.org/bot{os.getenv('TELEGRAM_TOKEN')}"
@@ -15,7 +17,8 @@ URL = f"https://api.telegram.org/bot{os.getenv('TELEGRAM_TOKEN')}"
 MENUS = ["라면", "햄버거", "마라탕", "샐러드"]
 
 app = FastAPI()  # 웹 서버 앱
-
+conn = db.connect() # lunch.db 파일을 열고 표가 없으면 만든다 (서버가 켜질 때 한번만)
+ 
 
 @app.post("/")  # 텔레그램이 메시지(JSON)를 이 주소로 POST 해 준다 (webhook)
 def webhook(body: dict):
@@ -41,6 +44,21 @@ def webhook(body: dict):
         output = "이번 주 행운의 번호: " + ", ".join(str(n) for n in numbers)
     elif text == "/weather":
         output = weather_text()
+    elif text == "/ate" or text.startswith("/ate"):
+        menu = text[4:].strip() # /ate 김치찌개" -> 앞 4글자("/ate")를 잘라내고 남은 "김치찌개"의 공백 제거
+        if menu:
+            db.save_meal(conn, menu, db.now())
+            output = f"기록했어요: {menu}"
+        else:
+            output = "사용법: /ate 김치찌개"
+    elif text == "/history":
+        meals = db.recent_meals(conn)
+        if meals:
+            output = "\n".join(f"{eaten_at} {menu}" for eaten_at, menu in meals)
+    else:
+            output = "아직 기록이 없어요"
+        else:
+            output = "오늘 먹은 메뉴를 기록하려면 /ate 메뉴명 처럼 보내 주세요."
     elif text.startswith("/"):
         output = "모르는 명령이에요. /help 를 보내 보세요."
     else:
